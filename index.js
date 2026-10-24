@@ -405,7 +405,48 @@ client.on('interactionCreate', async interaction => {
       return broadcast(interaction, targetRole, embed);
     }
 
-    if (name === 'lock' || name === 'unlock') {
+   
+if (name === 'lock' || name === 'unlock') {
+  if (!interaction.memberPermissions.has(
+    PermissionFlagsBits.ManageChannels
+  )) {
+    return interaction.reply({
+      content: '❌ تحتاج صلاحية Manage Channels.',
+      ephemeral: true
+    });
+  }
+
+  const channel = interaction.channel;
+  const everyone = interaction.guild.roles.everyone;
+  const shouldLock = name === 'lock';
+
+  try {
+    await channel.permissionOverwrites.edit(
+      everyone.id,
+      {
+        SendMessages: shouldLock ? false : null,
+        AddReactions: shouldLock ? false : null
+      },
+      {
+        reason: `${name} by ${interaction.user.tag}`
+      }
+    );
+
+    return interaction.reply({
+      content: shouldLock
+        ? '🔒 تم قفل الروم بنجاح.'
+        : '🔓 تمت إعادة صلاحيات الروم للوضع الافتراضي.'
+    });
+  } catch (error) {
+    console.error('Lock/unlock error:', error);
+
+    return interaction.reply({
+      content: '❌ فشل تعديل صلاحيات الروم. تأكد أن البوت يملك Manage Channels.',
+      ephemeral: true
+    });
+  }
+}
+
       if (!interaction.memberPermissions.has(
         PermissionFlagsBits.ManageChannels
       )) {
