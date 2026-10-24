@@ -1,5 +1,4 @@
 
-
 const {
   Client,
   GatewayIntentBits,
@@ -180,7 +179,7 @@ const commands = [
     )
     .addStringOption(option =>
       option.setName('reason')
-        .setDescription('السبب')
+        .setDescription('سبب الطرد')
         .setRequired(false)
     ),
 
@@ -194,11 +193,10 @@ const commands = [
     )
     .addStringOption(option =>
       option.setName('reason')
-        .setDescription('السبب')
+        .setDescription('سبب الحظر')
         .setRequired(false)
-    ),
-
-  new SlashCommandBuilder()
+    ), 
+    new SlashCommandBuilder()
     .setName('timeout')
     .setDescription('إعطاء عضو تايم أوت')
     .addUserOption(option =>
@@ -363,31 +361,30 @@ async function sendBroadcast(interaction, targetRoleId = null) {
   const guild = interaction.guild;
 
   if (!guild) {
-    return interaction.editReply('❌ الأمر لازم تستخدمه داخل السيرفر.');
+    return interaction.editReply('❌ هذا الأمر يعمل داخل السيرفر فقط.');
   }
-
-  const embed = makeBroadcastEmbed(interaction);
 
   let members;
 
   try {
-    members = await guild.members.fetch();
+    await guild.members.fetch();
+    members = guild.members.cache.filter(member => !member.user.bot);
+
+    if (targetRoleId) {
+      members = members.filter(member =>
+        member.roles.cache.has(targetRoleId)
+      );
+    }
   } catch (error) {
-    console.error('Member fetch error:', error);
-    return interaction.editReply(
-      '❌ ما قدرت أجيب أعضاء السيرفر. تأكد من تفعيل Server Members Intent.'
-    );
+    console.error('خطأ جلب الأعضاء:', error);
+    return interaction.editReply('❌ ما قدرت أجيب قائمة الأعضاء.');
   }
 
-  const recipients = members.filter(member =>
-    !member.user.bot &&
-    (!targetRoleId || member.roles.cache.has(targetRoleId))
-  );
-
+  const embed = makeBroadcastEmbed(interaction);
   let sent = 0;
   let failed = 0;
 
-  for (const [, member] of recipients) {
+  for (const member of members.values()) {
     try {
       await member.send({ embeds: [embed] });
       sent++;
@@ -397,10 +394,9 @@ async function sendBroadcast(interaction, targetRoleId = null) {
   }
 
   return interaction.editReply(
-    `✅ انتهى البرودكاست.\n📨 تم الإرسال: ${sent}\n⚠️ تعذر الإرسال: ${failed}`
+    `✅ انتهى البرودكاست.\n📨 تم الإرسال: ${sent}\n❌ تعذر الإرسال: ${failed}`
   );
 }
-
 // ==================== تنفيذ الأوامر ====================
 
 client.on('interactionCreate', async interaction => {
@@ -549,31 +545,22 @@ client.on('interactionCreate', async interaction => {
           interaction.guild.roles.everyone.id,
           {
             Connect: shouldLock ? false : null
-          },
-          {
-            reason: `${name} by ${interaction.user.tag}`
-          }
-        );
-      } else if (channel.isTextBased()) {
-        await channel.permissionOverwrites.edit(
-          interaction.guild.roles.everyone.id,
-          {
-            SendMessages: shouldLock ? false : null,
-            AddReactions: shouldLock ? false : null
-          },
-          {
-            reason: `${name} by ${interaction.user.tag}`
           }
         );
       } else {
-        return replyError(interaction, '❌ نوع الروم غير مدعوم لهذا الأمر.');
+        await channel.permissionOverwrites.edit(
+          interaction.guild.roles.everyone.id,
+          {
+            SendMessages: shouldLock ? false : null
+          }
+        );
       }
 
-      return interaction.reply({
-        content: shouldLock
-          ? '🔒 تم قفل الروم بنجاح.'
-          : '🔓 تمت إعادة صلاحيات الروم للوضع الافتراضي.'
-      });
+      return interaction.reply(
+        shouldLock
+          ? '🔒 تم قفل الروم.'
+          : '🔓 تم فتح الروم.'
+      );
     }
 
     // clear
@@ -586,23 +573,17 @@ client.on('interactionCreate', async interaction => {
 
       const amount = interaction.options.getInteger('amount');
 
-      if (!interaction.channel?.bulkDelete) {
-        return replyError(interaction, '❌ ما أقدر أحذف الرسائل في هذا الروم.');
-      }
-
       const deleted = await interaction.channel.bulkDelete(amount, true);
 
       return interaction.reply({
-        content: `✅ تم حذف ${deleted.size} رسالة.`,
+        content: `🧹 تم حذف ${deleted.size} رسالة.`,
         ephemeral: true
       });
     }
 
     // kick
     if (name === 'kick') {
-      if (!interaction.memberPermissions.has(
-        PermissionFlagsBits.KickMembers
-      )) {
+      if (!interaction.memberPermissions.has(PermissionFlagsBits.KickMembers)) {
         return replyError(interaction, '❌ تحتاج صلاحية Kick Members.');
       }
 
@@ -621,9 +602,7 @@ client.on('interactionCreate', async interaction => {
 
     // ban
     if (name === 'ban') {
-      if (!interaction.memberPermissions.has(
-        PermissionFlagsBits.BanMembers
-      )) {
+      if (!interaction.memberPermissions.has(PermissionFlagsBits.BanMembers)) {
         return replyError(interaction, '❌ تحتاج صلاحية Ban Members.');
       }
 
@@ -634,8 +613,7 @@ client.on('interactionCreate', async interaction => {
 
       return interaction.reply(`🔨 تم حظر ${user.tag}.\nالسبب: ${reason}`);
     }
-
-    // timeout
+        // timeout
     if (name === 'timeout') {
       if (!interaction.memberPermissions.has(
         PermissionFlagsBits.ModerateMembers
@@ -660,7 +638,7 @@ client.on('interactionCreate', async interaction => {
       );
     }
 
-    // role
+    // role / removerole
     if (name === 'role' || name === 'removerole') {
       if (!interaction.memberPermissions.has(
         PermissionFlagsBits.ManageRoles
@@ -715,11 +693,12 @@ client.on('interactionCreate', async interaction => {
 
 // ==================== تشغيل البوت ====================
 
-// خادم بسيط للاستضافات التي تتطلب منفذ HTTP
 const PORT = process.env.PORT || 10000;
 
 http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.writeHead(200, {
+    'Content-Type': 'text/plain; charset=utf-8'
+  });
   res.end('Blor System is online!');
 }).listen(PORT, '0.0.0.0', () => {
   console.log(`🌐 HTTP server listening on port ${PORT}`);
