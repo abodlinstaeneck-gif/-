@@ -1,49 +1,61 @@
 
+
 const {
   Client,
   GatewayIntentBits,
-  PermissionFlagsBits,
-  EmbedBuilder,
+  Partials,
   REST,
   Routes,
-  SlashCommandBuilder
+  SlashCommandBuilder,
+  EmbedBuilder,
+  PermissionFlagsBits,
+  ChannelType
 } = require('discord.js');
 
-const fs = require('node:fs');
-const path = require('node:path');
+const fs = require('fs');
+const path = require('path');
+const http = require('http');
+
+// ==================== الإعدادات ====================
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-const GUILD_ID = process.env.GUILD_ID || '';
-const BOT_NAME = 'Blor System';
-const CONFIG_FILE = path.join(__dirname, 'config.json');
+const GUILD_ID = process.env.GUILD_ID;
 
 if (!TOKEN || !CLIENT_ID) {
-  console.error('Missing TOKEN or CLIENT_ID in environment variables.');
+  console.error('❌ تأكد من إضافة TOKEN و CLIENT_ID في Environment Variables.');
   process.exit(1);
 }
 
-let config = { allowedRoles: {} };
+const CONFIG_PATH = path.join(__dirname, 'config.json');
 
-try {
-  if (fs.existsSync(CONFIG_FILE)) {
-    config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-    if (!config.allowedRoles) config.allowedRoles = {};
+function loadConfig() {
+  try {
+    if (fs.existsSync(CONFIG_PATH)) {
+      return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    }
+  } catch (error) {
+    console.error('خطأ قراءة config.json:', error);
   }
-} catch (error) {
-  console.error('Error reading config.json:', error.message);
+
+  return { broadcastRoles: [] };
 }
 
+let config = loadConfig();
+
 function saveConfig() {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers
-  ]
+  ],
+  partials: [Partials.User]
 });
+
+// ==================== الأوامر ====================
 
 const commands = [
   new SlashCommandBuilder()
@@ -52,561 +64,668 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('ping')
-    .setDescription('سرعة استجابة البوت'),
+    .setDescription('معرفة سرعة استجابة البوت'),
 
   new SlashCommandBuilder()
     .setName('server')
-    .setDescription('معلومات السيرفر'),
+    .setDescription('عرض معلومات السيرفر'),
 
   new SlashCommandBuilder()
     .setName('setrole')
-    .setDescription('السماح لرول باستخدام أوامر البوت')
-    .addRoleOption(o =>
-      o.setName('role').setDescription('الرول').setRequired(true))
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    .setDescription('السماح لرول باستخدام أوامر البرودكاست')
+    .addRoleOption(option =>
+      option.setName('role')
+        .setDescription('الرول المسموح')
+        .setRequired(true)
+    ),
 
   new SlashCommandBuilder()
     .setName('unsetrole')
-    .setDescription('إزالة صلاحية رول')
-    .addRoleOption(o =>
-      o.setName('role').setDescription('الرول').setRequired(true))
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    .setDescription('إزالة صلاحية البرودكاست من رول')
+    .addRoleOption(option =>
+      option.setName('role')
+        .setDescription('الرول المراد إزالته')
+        .setRequired(true)
+    ),
 
   new SlashCommandBuilder()
     .setName('bc')
-    .setDescription('برودكاست خاص لجميع الأعضاء')
-    .addStringOption(o =>
-      o.setName('title').setDescription('عنوان الإعلان').setRequired(true))
-    .addStringOption(o =>
-      o.setName('message').setDescription('نص الإعلان').setRequired(true))
-    .addStringOption(o =>
-      o.setName('color').setDescription('لون مثل #5865F2').setRequired(false))
-    .addStringOption(o =>
-      o.setName('image').setDescription('رابط الصورة').setRequired(false))
-    .addStringOption(o =>
-      o.setName('link').setDescription('رابط الإعلان').setRequired(false)),
+    .setDescription('إرسال برودكاست خاص لأعضاء السيرفر')
+    .addStringOption(option =>
+      option.setName('title')
+        .setDescription('عنوان الإمبد')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName('message')
+        .setDescription('نص الرسالة')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName('color')
+        .setDescription('لون الإمبد مثل #4b0d1a')
+        .setRequired(false)
+    )
+    .addStringOption(option =>
+      option.setName('image')
+        .setDescription('رابط صورة اختياري')
+        .setRequired(false)
+    )
+    .addStringOption(option =>
+      option.setName('link')
+        .setDescription('رابط اختياري')
+        .setRequired(false)
+    ),
 
   new SlashCommandBuilder()
     .setName('bcrole')
-    .setDescription('برودكاست خاص لرول محدد')
-    .addRoleOption(o =>
-      o.setName('role').setDescription('الرول المستهدف').setRequired(true))
-    .addStringOption(o =>
-      o.setName('title').setDescription('عنوان الإعلان').setRequired(true))
-    .addStringOption(o =>
-      o.setName('message').setDescription('نص الإعلان').setRequired(true))
-    .addStringOption(o =>
-      o.setName('color').setDescription('لون مثل #5865F2').setRequired(false))
-    .addStringOption(o =>
-      o.setName('image').setDescription('رابط الصورة').setRequired(false))
-    .addStringOption(o =>
-      o.setName('link').setDescription('رابط الإعلان').setRequired(false)),
+    .setDescription('إرسال برودكاست خاص لأعضاء رول معين')
+    .addRoleOption(option =>
+      option.setName('target_role')
+        .setDescription('الرول المستهدف')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName('title')
+        .setDescription('عنوان الإمبد')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName('message')
+        .setDescription('نص الرسالة')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName('color')
+        .setDescription('لون الإمبد مثل #4b0d1a')
+        .setRequired(false)
+    )
+    .addStringOption(option =>
+      option.setName('image')
+        .setDescription('رابط صورة اختياري')
+        .setRequired(false)
+    )
+    .addStringOption(option =>
+      option.setName('link')
+        .setDescription('رابط اختياري')
+        .setRequired(false)
+    ),
 
   new SlashCommandBuilder()
     .setName('lock')
-    .setDescription('قفل الروم')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+    .setDescription('قفل الروم'),
 
   new SlashCommandBuilder()
     .setName('unlock')
-    .setDescription('فتح الروم')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+    .setDescription('فتح الروم'),
 
   new SlashCommandBuilder()
     .setName('clear')
-    .setDescription('حذف رسائل')
-    .addIntegerOption(o =>
-      o.setName('amount')
+    .setDescription('حذف رسائل من الروم')
+    .addIntegerOption(option =>
+      option.setName('amount')
         .setDescription('عدد الرسائل من 1 إلى 100')
-        .setMinValue(1).setMaxValue(100).setRequired(true))
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+        .setMinValue(1)
+        .setMaxValue(100)
+        .setRequired(true)
+    ),
 
   new SlashCommandBuilder()
     .setName('kick')
     .setDescription('طرد عضو')
-    .addUserOption(o =>
-      o.setName('member').setDescription('العضو').setRequired(true))
-    .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
+    .addUserOption(option =>
+      option.setName('user')
+        .setDescription('العضو')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName('reason')
+        .setDescription('السبب')
+        .setRequired(false)
+    ),
 
   new SlashCommandBuilder()
     .setName('ban')
     .setDescription('حظر عضو')
-    .addUserOption(o =>
-      o.setName('member').setDescription('العضو').setRequired(true))
-    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
+    .addUserOption(option =>
+      option.setName('user')
+        .setDescription('العضو')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName('reason')
+        .setDescription('السبب')
+        .setRequired(false)
+    ),
 
   new SlashCommandBuilder()
     .setName('timeout')
-    .setDescription('إسكات عضو مؤقتاً')
-    .addUserOption(o =>
-      o.setName('member').setDescription('العضو').setRequired(true))
-    .addIntegerOption(o =>
-      o.setName('minutes').setDescription('المدة بالدقائق')
-        .setMinValue(1).setMaxValue(40320).setRequired(true))
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+    .setDescription('إعطاء عضو تايم أوت')
+    .addUserOption(option =>
+      option.setName('user')
+        .setDescription('العضو')
+        .setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option.setName('minutes')
+        .setDescription('المدة بالدقائق، الحد الأقصى 40320')
+        .setMinValue(1)
+        .setMaxValue(40320)
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName('reason')
+        .setDescription('السبب')
+        .setRequired(false)
+    ),
 
   new SlashCommandBuilder()
     .setName('role')
-    .setDescription('إعطاء رول لعضو')
-    .addUserOption(o =>
-      o.setName('member').setDescription('العضو').setRequired(true))
-    .addRoleOption(o =>
-      o.setName('role').setDescription('الرول').setRequired(true))
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+    .setDescription('إعطاء عضو رول')
+    .addUserOption(option =>
+      option.setName('user')
+        .setDescription('العضو')
+        .setRequired(true)
+    )
+    .addRoleOption(option =>
+      option.setName('role')
+        .setDescription('الرول')
+        .setRequired(true)
+    ),
 
   new SlashCommandBuilder()
     .setName('removerole')
     .setDescription('إزالة رول من عضو')
-    .addUserOption(o =>
-      o.setName('member').setDescription('العضو').setRequired(true))
-    .addRoleOption(o =>
-      o.setName('role').setDescription('الرول').setRequired(true))
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .addUserOption(option =>
+      option.setName('user')
+        .setDescription('العضو')
+        .setRequired(true)
+    )
+    .addRoleOption(option =>
+      option.setName('role')
+        .setDescription('الرول')
+        .setRequired(true)
+    )
 ].map(command => command.toJSON());
+
+// ==================== تسجيل الأوامر ====================
+
+client.once('ready', async () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
+
+  client.user.setPresence({
+    activities: [{ name: 'Blor System' }],
+    status: 'online'
+  });
+
+  try {
+    const rest = new REST({ version: '10' }).setToken(TOKEN);
+
+    if (GUILD_ID) {
+      await rest.put(
+        Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+        { body: commands }
+      );
+    } else {
+      await rest.put(
+        Routes.applicationCommands(CLIENT_ID),
+        { body: commands }
+      );
+    }
+
+    console.log('✅ Slash commands registered successfully.');
+  } catch (error) {
+    console.error('❌ Command registration error:', error);
+  }
+});
+
+// ==================== أدوات مساعدة ====================
+
+async function replyError(interaction, message) {
+  const data = { content: message };
+
+  if (interaction.deferred || interaction.replied) {
+    return interaction.followUp({ ...data, ephemeral: true });
+  }
+
+  return interaction.reply({ ...data, ephemeral: true });
+}
 
 function isAdmin(interaction) {
   return interaction.memberPermissions?.has(
     PermissionFlagsBits.Administrator
-  ) ?? false;
+  );
 }
 
-function canUseBroadcast(interaction) {
+function canBroadcast(interaction) {
   if (isAdmin(interaction)) return true;
 
-  const allowed = config.allowedRoles[interaction.guildId] || [];
-  const memberRoles = interaction.member.roles.cache;
+  const allowedRoles = config.broadcastRoles || [];
 
-  return allowed.some(roleId => memberRoles.has(roleId));
+  return allowedRoles.some(roleId =>
+    interaction.member?.roles?.cache?.has(roleId)
+  );
 }
 
-function getUrl(value) {
+function validUrl(value) {
   if (!value) return null;
 
   try {
     const url = new URL(value);
-    if (url.protocol === 'https:' || url.protocol === 'http:') {
-      return url.toString();
-    }
-  } catch {}
 
-  return null;
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
-function makeEmbed(interaction, title, message, color, image, link) {
-  let embedColor = 0x5865F2;
+function makeBroadcastEmbed(interaction) {
+  const title = interaction.options.getString('title');
+  const message = interaction.options.getString('message');
+  const requestedColor = interaction.options.getString('color') || '#4b0d1a';
+  const image = interaction.options.getString('image');
+  const link = interaction.options.getString('link');
 
-  if (color) {
-    const hex = color.replace('#', '').trim();
-
-    if (!/^[0-9a-fA-F]{6}$/.test(hex)) {
-      throw new Error('اللون غير صحيح. مثال: #5865F2');
-    }
-
-    embedColor = parseInt(hex, 16);
-  }
-
-  if (image && !getUrl(image)) {
-    throw new Error('رابط الصورة غير صحيح.');
-  }
-
-  if (link && !getUrl(link)) {
-    throw new Error('الرابط غير صحيح.');
-  }
+  const color = /^#?[0-9a-fA-F]{6}$/.test(requestedColor)
+    ? parseInt(requestedColor.replace('#', ''), 16)
+    : 0x4b0d1a;
 
   const embed = new EmbedBuilder()
-    .setColor(embedColor)
-    .setTitle(title)
-    .setDescription(message)
+    .setColor(color)
+    .setTitle(title.slice(0, 256))
+    .setDescription(message.slice(0, 4000))
     .setFooter({
-      text: `${BOT_NAME} • ${interaction.guild.name}`
+      text: interaction.guild.name
     })
     .setTimestamp();
 
-  if (image) embed.setImage(getUrl(image));
+  const imageUrl = validUrl(image);
+  const linkUrl = validUrl(link);
 
-  if (link) {
-    embed.addFields({
-      name: 'الرابط',
-      value: `[اضغط هنا لفتح الرابط](${getUrl(link)})`
-    });
-  }
+  if (imageUrl) embed.setImage(imageUrl);
+  if (linkUrl) embed.setURL(linkUrl);
 
   return embed;
 }
 
-async function broadcast(interaction, targetRole, embed) {
+async function sendBroadcast(interaction, targetRoleId = null) {
+  if (!canBroadcast(interaction)) {
+    return replyError(
+      interaction,
+      '❌ ما عندك صلاحية استخدام أوامر البرودكاست. اطلب من الإدارة إضافة رولك باستخدام /setrole.'
+    );
+  }
+
   await interaction.deferReply({ ephemeral: true });
+
+  const guild = interaction.guild;
+
+  if (!guild) {
+    return interaction.editReply('❌ الأمر لازم تستخدمه داخل السيرفر.');
+  }
+
+  const embed = makeBroadcastEmbed(interaction);
 
   let members;
 
   try {
-    members = await interaction.guild.members.fetch();
-  } catch {
+    members = await guild.members.fetch();
+  } catch (error) {
+    console.error('Member fetch error:', error);
     return interaction.editReply(
-      'تعذر جلب الأعضاء. تأكد من تفعيل Server Members Intent.'
+      '❌ ما قدرت أجيب أعضاء السيرفر. تأكد من تفعيل Server Members Intent.'
     );
   }
 
-  const targets = [...members.values()].filter(member =>
+  const recipients = members.filter(member =>
     !member.user.bot &&
-    (!targetRole || member.roles.cache.has(targetRole.id))
+    (!targetRoleId || member.roles.cache.has(targetRoleId))
   );
 
   let sent = 0;
   let failed = 0;
 
-  await interaction.editReply(
-    `بدأ الإرسال إلى ${targets.length} عضو. انتظر حتى يكتمل التقرير.`
-  );
-
-  for (const member of targets) {
+  for (const [, member] of recipients) {
     try {
-      await member.send({
-        embeds: [embed],
-        allowedMentions: { parse: [] }
-      });
+      await member.send({ embeds: [embed] });
       sent++;
     } catch {
       failed++;
     }
-
-    // تأخير بين الرسائل وعدم محاولة تجاوز حدود Discord.
-    await new Promise(resolve => setTimeout(resolve, 1500));
   }
 
-  await interaction.editReply(
-    `**انتهى البرودكاست**\n` +
-    `✅ نجح الإرسال: ${sent}\n` +
-    `❌ تعذر الإرسال: ${failed}\n` +
-    `👥 عدد المستهدفين: ${targets.length}`
+  return interaction.editReply(
+    `✅ انتهى البرودكاست.\n📨 تم الإرسال: ${sent}\n⚠️ تعذر الإرسال: ${failed}`
   );
 }
 
-client.once('ready', async () => {
-  console.log(`Logged in as ${client.user.tag}`);
-
-  client.user.setActivity('Blor System');
-
-  try {
-    const rest = new REST({ version: '10' }).setToken(TOKEN);
-
-    const route = GUILD_ID
-      ? Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID)
-      : Routes.applicationCommands(CLIENT_ID);
-
-    await rest.put(route, { body: commands });
-    console.log('Slash commands registered successfully.');
-  } catch (error) {
-    console.error('Command registration error:', error.message);
-  }
-});
+// ==================== تنفيذ الأوامر ====================
 
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
-  if (!interaction.guild) return;
 
   const name = interaction.commandName;
 
   try {
+    if (!interaction.guild) {
+      return replyError(interaction, '❌ استخدم الأمر داخل السيرفر.');
+    }
+
+    // help
     if (name === 'help') {
       const embed = new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setTitle('Blor System • الأوامر')
-        .setDescription(
-          '**عام:** `/ping` `/server` `/help`\n' +
-          '**برودكاست:** `/bc` `/bcrole`\n' +
-          '**صلاحيات:** `/setrole` `/unsetrole`\n' +
-          '**رومات:** `/lock` `/unlock`\n' +
-          '**إدارة:** `/ban` `/kick` `/timeout` `/clear`\n' +
-          '**رولات:** `/role` `/removerole`'
-        );
+        .setColor(0x4b0d1a)
+        .setTitle('Blor System | الأوامر')
+        .setDescription([
+          '`/help` عرض الأوامر',
+          '`/ping` سرعة البوت',
+          '`/server` معلومات السيرفر',
+          '`/setrole` السماح لرول بالبرودكاست',
+          '`/unsetrole` إزالة صلاحية البرودكاست',
+          '`/bc` برودكاست خاص لجميع الأعضاء',
+          '`/bcrole` برودكاست خاص لرول محدد',
+          '`/lock` قفل الروم',
+          '`/unlock` فتح الروم',
+          '`/clear` حذف رسائل',
+          '`/kick` طرد عضو',
+          '`/ban` حظر عضو',
+          '`/timeout` تايم أوت',
+          '`/role` إعطاء رول',
+          '`/removerole` إزالة رول'
+        ].join('\n'));
 
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
+    // ping
     if (name === 'ping') {
+      return interaction.reply(
+        `🏓 سرعة استجابة البوت: ${client.ws.ping}ms`
+      );
+    }
+
+    // server
+    if (name === 'server') {
+      const guild = interaction.guild;
+
+      const embed = new EmbedBuilder()
+        .setColor(0x4b0d1a)
+        .setTitle(guild.name)
+        .addFields(
+          {
+            name: 'عدد الأعضاء',
+            value: `${guild.memberCount}`,
+            inline: true
+          },
+          {
+            name: 'معرّف السيرفر',
+            value: guild.id,
+            inline: true
+          },
+          {
+            name: 'تاريخ إنشاء السيرفر',
+            value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:D>`,
+            inline: true
+          }
+        );
+
+      if (guild.iconURL()) embed.setThumbnail(guild.iconURL());
+
+      return interaction.reply({ embeds: [embed] });
+    }
+
+    // setrole
+    if (name === 'setrole') {
+      if (!isAdmin(interaction)) {
+        return replyError(interaction, '❌ هذا الأمر للإدارة فقط.');
+      }
+
+      const role = interaction.options.getRole('role');
+
+      if (!config.broadcastRoles.includes(role.id)) {
+        config.broadcastRoles.push(role.id);
+        saveConfig();
+      }
+
       return interaction.reply({
-        content: `🏓 Ping: ${client.ws.ping}ms`,
+        content: `✅ تم السماح للرول ${role} باستخدام أوامر البرودكاست.`,
         ephemeral: true
       });
     }
 
-    if (name === 'server') {
-      const guild = interaction.guild;
-      const embed = new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setTitle(guild.name)
-        .setThumbnail(guild.iconURL())
-        .addFields(
-          { name: 'الأعضاء', value: `${guild.memberCount}`, inline: true },
-          { name: 'معرّف السيرفر', value: guild.id }
-        );
-
-      return interaction.reply({ embeds: [embed], ephemeral: true });
-    }
-
-    if (name === 'setrole' || name === 'unsetrole') {
+    // unsetrole
+    if (name === 'unsetrole') {
       if (!isAdmin(interaction)) {
-        return interaction.reply({
-          content: 'هذا الأمر للمسؤولين فقط.',
-          ephemeral: true
-        });
+        return replyError(interaction, '❌ هذا الأمر للإدارة فقط.');
       }
 
       const role = interaction.options.getRole('role');
-      const roles = new Set(
-        config.allowedRoles[interaction.guildId] || []
+
+      config.broadcastRoles = config.broadcastRoles.filter(
+        id => id !== role.id
       );
 
-      if (name === 'setrole') roles.add(role.id);
-      else roles.delete(role.id);
-
-      config.allowedRoles[interaction.guildId] = [...roles];
       saveConfig();
 
       return interaction.reply({
-        content: name === 'setrole'
-          ? `تم السماح للرول ${role} باستخدام البرودكاست.`
-          : `تمت إزالة صلاحية الرول ${role}.`,
+        content: `✅ تمت إزالة صلاحية البرودكاست من ${role}.`,
         ephemeral: true
       });
     }
 
-    if (name === 'bc' || name === 'bcrole') {
-      if (!canUseBroadcast(interaction)) {
-        return interaction.reply({
-          content: 'ليس لديك صلاحية البرودكاست. اطلب من مسؤول السيرفر ضبط الرولات.',
-          ephemeral: true
-        });
-      }
-
-      const targetRole = name === 'bcrole'
-        ? interaction.options.getRole('role')
-        : null;
-
-      let embed;
-
-      try {
-        embed = makeEmbed(
-          interaction,
-          interaction.options.getString('title'),
-          interaction.options.getString('message'),
-          interaction.options.getString('color'),
-          interaction.options.getString('image'),
-          interaction.options.getString('link')
-        );
-      } catch (error) {
-        return interaction.reply({
-          content: error.message,
-          ephemeral: true
-        });
-      }
-
-      return broadcast(interaction, targetRole, embed);
+    // bc
+    if (name === 'bc') {
+      return sendBroadcast(interaction);
     }
 
-   
-if (name === 'lock' || name === 'unlock') {
-  if (!interaction.memberPermissions.has(
-    PermissionFlagsBits.ManageChannels
-  )) {
-    return interaction.reply({
-      content: '❌ تحتاج صلاحية Manage Channels.',
-      ephemeral: true
-    });
-  }
+    // bcrole
+    if (name === 'bcrole') {
+      const role = interaction.options.getRole('target_role');
 
-  const channel = interaction.channel;
-  const everyone = interaction.guild.roles.everyone;
-  const shouldLock = name === 'lock';
+      return sendBroadcast(interaction, role.id);
+    }
 
-  try {
-    await channel.permissionOverwrites.edit(
-      everyone.id,
-      {
-        SendMessages: shouldLock ? false : null,
-        AddReactions: shouldLock ? false : null
-      },
-      {
-        reason: `${name} by ${interaction.user.tag}`
-      }
-    );
-
-    return interaction.reply({
-      content: shouldLock
-        ? '🔒 تم قفل الروم بنجاح.'
-        : '🔓 تمت إعادة صلاحيات الروم للوضع الافتراضي.'
-    });
-  } catch (error) {
-    console.error('Lock/unlock error:', error);
-
-    return interaction.reply({
-      content: '❌ فشل تعديل صلاحيات الروم. تأكد أن البوت يملك Manage Channels.',
-      ephemeral: true
-    });
-  }
-}
-
+    // lock / unlock
+    if (name === 'lock' || name === 'unlock') {
       if (!interaction.memberPermissions.has(
         PermissionFlagsBits.ManageChannels
       )) {
-        return interaction.reply({
-          content: 'تحتاج صلاحية Manage Channels.',
-          ephemeral: true
-        });
+        return replyError(
+          interaction,
+          '❌ تحتاج صلاحية Manage Channels.'
+        );
       }
 
-      const lock = name === 'lock';
+      const channel = interaction.channel;
+      const shouldLock = name === 'lock';
 
-      await interaction.channel.permissionOverwrites.edit(
-        interaction.guild.roles.everyone,
-        {
-          SendMessages: lock ? false : null,
-          AddReactions: lock ? false : null
-        }
-      );
+      if (
+        channel.type === ChannelType.GuildVoice ||
+        channel.type === ChannelType.GuildStageVoice
+      ) {
+        await channel.permissionOverwrites.edit(
+          interaction.guild.roles.everyone.id,
+          {
+            Connect: shouldLock ? false : null
+          },
+          {
+            reason: `${name} by ${interaction.user.tag}`
+          }
+        );
+      } else if (channel.isTextBased()) {
+        await channel.permissionOverwrites.edit(
+          interaction.guild.roles.everyone.id,
+          {
+            SendMessages: shouldLock ? false : null,
+            AddReactions: shouldLock ? false : null
+          },
+          {
+            reason: `${name} by ${interaction.user.tag}`
+          }
+        );
+      } else {
+        return replyError(interaction, '❌ نوع الروم غير مدعوم لهذا الأمر.');
+      }
 
-      return interaction.reply(
-        lock ? '🔒 تم قفل الروم.' : '🔓 تم فتح الروم.'
-      );
+      return interaction.reply({
+        content: shouldLock
+          ? '🔒 تم قفل الروم بنجاح.'
+          : '🔓 تمت إعادة صلاحيات الروم للوضع الافتراضي.'
+      });
     }
 
+    // clear
     if (name === 'clear') {
+      if (!interaction.memberPermissions.has(
+        PermissionFlagsBits.ManageMessages
+      )) {
+        return replyError(interaction, '❌ تحتاج صلاحية Manage Messages.');
+      }
+
       const amount = interaction.options.getInteger('amount');
+
+      if (!interaction.channel?.bulkDelete) {
+        return replyError(interaction, '❌ ما أقدر أحذف الرسائل في هذا الروم.');
+      }
+
       const deleted = await interaction.channel.bulkDelete(amount, true);
 
       return interaction.reply({
-        content: `تم حذف ${deleted.size} رسالة.`,
+        content: `✅ تم حذف ${deleted.size} رسالة.`,
         ephemeral: true
       });
     }
 
-    if (name === 'kick' || name === 'ban' || name === 'timeout') {
-      const user = interaction.options.getUser('member');
-      const member = await interaction.guild.members.fetch(user.id)
-        .catch(() => null);
+    // kick
+    if (name === 'kick') {
+      if (!interaction.memberPermissions.has(
+        PermissionFlagsBits.KickMembers
+      )) {
+        return replyError(interaction, '❌ تحتاج صلاحية Kick Members.');
+      }
+
+      const user = interaction.options.getUser('user');
+      const reason = interaction.options.getString('reason') || 'بدون سبب';
+      const member = await interaction.guild.members.fetch(user.id).catch(() => null);
 
       if (!member) {
-        return interaction.reply({
-          content: 'العضو غير موجود في السيرفر.',
-          ephemeral: true
-        });
+        return replyError(interaction, '❌ العضو غير موجود في السيرفر.');
       }
 
-      if (member.id === interaction.user.id) {
-        return interaction.reply({
-          content: 'لا يمكنك استخدام الأمر على نفسك.',
-          ephemeral: true
-        });
+      await member.kick(reason);
+
+      return interaction.reply(`👢 تم طرد ${user.tag}.\nالسبب: ${reason}`);
+    }
+
+    // ban
+    if (name === 'ban') {
+      if (!interaction.memberPermissions.has(
+        PermissionFlagsBits.BanMembers
+      )) {
+        return replyError(interaction, '❌ تحتاج صلاحية Ban Members.');
       }
 
-      if (name === 'kick') {
-        if (!member.kickable) {
-          return interaction.reply({
-            content: 'لا يستطيع البوت طرد هذا العضو. تحقق من ترتيب الرتب.',
-            ephemeral: true
-          });
-        }
+      const user = interaction.options.getUser('user');
+      const reason = interaction.options.getString('reason') || 'بدون سبب';
 
-        await member.kick(`By ${interaction.user.tag}`);
+      await interaction.guild.members.ban(user.id, { reason });
 
-        return interaction.reply({
-          content: `تم طرد ${user.tag}.`,
-          ephemeral: true
-        });
+      return interaction.reply(`🔨 تم حظر ${user.tag}.\nالسبب: ${reason}`);
+    }
+
+    // timeout
+    if (name === 'timeout') {
+      if (!interaction.memberPermissions.has(
+        PermissionFlagsBits.ModerateMembers
+      )) {
+        return replyError(interaction, '❌ تحتاج صلاحية Moderate Members.');
       }
 
-      if (name === 'ban') {
-        if (!member.bannable) {
-          return interaction.reply({
-            content: 'لا يستطيع البوت حظر هذا العضو. تحقق من ترتيب الرتب.',
-            ephemeral: true
-          });
-        }
-
-        await member.ban({ reason: `By ${interaction.user.tag}` });
-
-        return interaction.reply({
-          content: `تم حظر ${user.tag}.`,
-          ephemeral: true
-        });
-      }
-
+      const user = interaction.options.getUser('user');
       const minutes = interaction.options.getInteger('minutes');
+      const reason = interaction.options.getString('reason') || 'بدون سبب';
 
-      if (!member.moderatable) {
-        return interaction.reply({
-          content: 'لا يستطيع البوت إسكات هذا العضو. تحقق من ترتيب الرتب.',
-          ephemeral: true
-        });
-      }
-
-      await member.timeout(
-        minutes * 60 * 1000,
-        `By ${interaction.user.tag}`
-      );
-
-      return interaction.reply({
-        content: `تم إسكات ${user.tag} لمدة ${minutes} دقيقة.`,
-        ephemeral: true
-      });
-    }
-
-    if (name === 'role' || name === 'removerole') {
-      const user = interaction.options.getUser('member');
-      const role = interaction.options.getRole('role');
-      const member = await interaction.guild.members.fetch(user.id)
-        .catch(() => null);
+      const member = await interaction.guild.members.fetch(user.id).catch(() => null);
 
       if (!member) {
-        return interaction.reply({
-          content: 'العضو غير موجود في السيرفر.',
-          ephemeral: true
-        });
+        return replyError(interaction, '❌ العضو غير موجود في السيرفر.');
       }
 
-      const botMember = interaction.guild.members.me;
+      await member.timeout(minutes * 60 * 1000, reason);
+
+      return interaction.reply(
+        `⏳ تم إعطاء ${user.tag} تايم أوت لمدة ${minutes} دقيقة.`
+      );
+    }
+
+    // role
+    if (name === 'role' || name === 'removerole') {
+      if (!interaction.memberPermissions.has(
+        PermissionFlagsBits.ManageRoles
+      )) {
+        return replyError(interaction, '❌ تحتاج صلاحية Manage Roles.');
+      }
+
+      const user = interaction.options.getUser('user');
+      const role = interaction.options.getRole('role');
+      const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+
+      if (!member) {
+        return replyError(interaction, '❌ العضو غير موجود في السيرفر.');
+      }
+
+      if (role.managed || role.id === interaction.guild.id) {
+        return replyError(interaction, '❌ لا يمكن تعديل هذا الرول.');
+      }
 
       if (
-        role.managed ||
-        role.position >= botMember.roles.highest.position
+        interaction.guild.members.me.roles.highest.comparePositionTo(role) <= 0
       ) {
-        return interaction.reply({
-          content: 'ارفع رتبة البوت فوق الرول المطلوب.',
-          ephemeral: true
-        });
+        return replyError(
+          interaction,
+          '❌ لازم يكون أعلى رول للبوت أعلى من الرول المطلوب.'
+        );
       }
 
-      if (name === 'role') await member.roles.add(role);
-      else await member.roles.remove(role);
+      if (name === 'role') {
+        await member.roles.add(role);
+        return interaction.reply(`✅ تم إعطاء ${user} الرول ${role}.`);
+      }
 
-      return interaction.reply({
-        content: name === 'role'
-          ? `تم إعطاء ${user} الرول ${role}.`
-          : `تمت إزالة الرول ${role} من ${user}.`,
-        ephemeral: true
-      });
+      await member.roles.remove(role);
+      return interaction.reply(`✅ تمت إزالة الرول ${role} من ${user}.`);
     }
   } catch (error) {
-    console.error(`Error in /${name}:`, error);
+    console.error(`Command error (${name}):`, error);
 
-    const message =
-      'حدث خطأ. تحقق من صلاحيات البوت وترتيب الرتب.';
-
-    if (interaction.deferred || interaction.replied) {
-      await interaction.followUp({
-        content: message,
-        ephemeral: true
-      }).catch(() => {});
-    } else {
-      await interaction.reply({
-        content: message,
-        ephemeral: true
-      }).catch(() => {});
+    if (interaction.deferred) {
+      return interaction.editReply(
+        '❌ صار خطأ أثناء تنفيذ الأمر. تأكد من صلاحيات البوت والرولات.'
+      ).catch(() => {});
     }
+
+    return replyError(
+      interaction,
+      '❌ صار خطأ أثناء تنفيذ الأمر. راجع صلاحيات البوت وسجل الأخطاء.'
+    ).catch(() => {});
   }
 });
 
-client.on('error', error => console.error('Discord error:', error));
+// ==================== تشغيل البوت ====================
 
-client.login(TOKEN);
+// خادم بسيط للاستضافات التي تتطلب منفذ HTTP
+const PORT = process.env.PORT || 10000;
+
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('Blor System is online!');
+}).listen(PORT, '0.0.0.0', () => {
+  console.log(`🌐 HTTP server listening on port ${PORT}`);
+});
+
+client.login(TOKEN).catch(error => {
+  console.error('❌ Discord login failed:', error);
+  process.exit(1);
+});
