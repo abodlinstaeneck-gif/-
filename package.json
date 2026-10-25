@@ -1,7 +1,7 @@
-
 {
   "name": "blor-system",
   "version": "1.0.0",
+  "description": "Blor System Discord Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
